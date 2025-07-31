@@ -24,6 +24,10 @@ class Feedback(db.Model):
     sentiment = db.Column(db.String(20))
 
 # Routes
+@app.route('/')
+def home():
+    return jsonify({"message": "Flask API is running!", "endpoints": ["/signup", "/login", "/feedback", "/admin/feedbacks"]})
+
 @app.route('/signup', methods=['POST'])
 def signup():
     data = request.json
@@ -65,4 +69,4 @@ def get_sentiment(text):
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run(debug=True)
+    app.run(debug=True, port=5001)
