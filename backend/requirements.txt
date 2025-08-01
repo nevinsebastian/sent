@@ -1,4 +1,7 @@
 Flask==2.3.3
 Flask-SQLAlchemy==3.0.5
 Flask-CORS==4.0.0
-textblob==0.17.1 
+textblob==0.17.1
+pandas
+scikit-learn
+nltk 
