@@ -6,6 +6,9 @@ import re
 import nltk
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
+from nltk.sentiment import SentimentIntensityAnalyzer
+import numpy as np
+from scipy.sparse import hstack
 
 app = Flask(__name__)
 CORS(app)
@@ -16,14 +19,14 @@ db = SQLAlchemy(app)
 
 # Load the trained emotion model and vectorizer
 try:
-    with open('emotion_model.pkl', 'rb') as f:
+    with open('emotion_model_final.pkl', 'rb') as f:
         emotion_model = pickle.load(f)
-    with open('emotion_vectorizer.pkl', 'rb') as f:
+    with open('emotion_vectorizer_final.pkl', 'rb') as f:
         emotion_vectorizer = pickle.load(f)
-    print("✅ Trained emotion model loaded successfully!")
-    print("Available emotions: neutral, love, happiness, sadness, relief, hate, anger, fun, enthusiasm, surprise, empty, worry, boredom")
+    print("✅ Improved emotion model loaded successfully!")
+    print("Available emotions: anger, boredom, empty, enthusiasm, fun, happiness, hate, love, neutral, relief, sadness, surprise, worry")
 except FileNotFoundError:
-    print("⚠️  Trained emotion model not found. Please run train_emotion_model.py first.")
+    print("⚠️  Improved emotion model not found. Please run train_emotion_model_final.py first.")
     emotion_model = None
     emotion_vectorizer = None
 
@@ -40,25 +43,50 @@ class Feedback(db.Model):
     text = db.Column(db.Text)
     emotion = db.Column(db.String(20))  # Changed from sentiment to emotion
 
-def preprocess_text(text):
-    """Clean and preprocess text data with better negation handling"""
+def preprocess_text_advanced(text):
+    """Advanced text preprocessing with better negation and sentiment handling"""
     if not text:
         return ""
     
     # Convert to lowercase
     text = str(text).lower()
     
-    # Handle negations better
-    negation_words = ['not', 'dont', 'doesnt', 'didnt', 'wont', 'cant', 'couldnt', 'shouldnt', 'wouldnt', 'havent', 'hasnt', 'hadnt']
+    # Handle contractions
+    contractions = {
+        "don't": "do not", "doesn't": "does not", "didn't": "did not",
+        "won't": "will not", "can't": "cannot", "couldn't": "could not",
+        "shouldn't": "should not", "wouldn't": "would not",
+        "haven't": "have not", "hasn't": "has not", "hadn't": "had not",
+        "i'm": "i am", "you're": "you are", "he's": "he is", "she's": "she is",
+        "it's": "it is", "we're": "we are", "they're": "they are"
+    }
     
-    # Add negation markers
-    for neg_word in negation_words:
-        if neg_word in text:
-            # Replace negation with a special marker
-            text = text.replace(neg_word, 'NOT_')
+    for contraction, expansion in contractions.items():
+        text = text.replace(contraction, expansion)
     
-    # Remove special characters and numbers
-    text = re.sub(r'[^a-zA-Z\s_]', '', text)
+    # Handle negations with better context - mark the entire phrase as negated
+    negation_words = ['not', 'no', 'never', 'none', 'nobody', 'nothing', 'neither', 'nowhere', 'hardly', 'barely', 'scarcely']
+    
+    # Split into words and mark negated phrases
+    words = text.split()
+    processed_words = []
+    negate_next = False
+    
+    for i, word in enumerate(words):
+        if word in negation_words:
+            negate_next = True
+            processed_words.append('NOT_')
+        elif negate_next:
+            # Mark the next few words as negated
+            processed_words.append(f'NOT_{word}')
+            negate_next = False
+        else:
+            processed_words.append(word)
+    
+    text = ' '.join(processed_words)
+    
+    # Remove special characters but keep important punctuation for sentiment
+    text = re.sub(r'[^a-zA-Z\s_!?]', '', text)
     
     # Remove extra whitespace
     text = re.sub(r'\s+', ' ', text).strip()
@@ -67,27 +95,80 @@ def preprocess_text(text):
     try:
         tokens = word_tokenize(text)
         stop_words = set(stopwords.words('english'))
-        # Keep negation markers and important words
-        tokens = [token for token in tokens if token not in stop_words or token.startswith('NOT_')]
+        # Keep negation markers and important sentiment words
+        tokens = [token for token in tokens if token not in stop_words or token.startswith('NOT_') or len(token) > 2]
         return ' '.join(tokens)
     except:
         return text
 
+def extract_sentiment_features(text):
+    """Extract additional sentiment features using VADER"""
+    sia = SentimentIntensityAnalyzer()
+    scores = sia.polarity_scores(text)
+    return {
+        'vader_compound': scores['compound'],
+        'vader_positive': scores['pos'],
+        'vader_negative': scores['neg'],
+        'vader_neutral': scores['neu']
+    }
+
 def get_emotion(text):
-    """Get emotion using the trained model"""
+    """Get emotion using the improved trained model with negation correction"""
     if emotion_model is None or emotion_vectorizer is None:
         print("❌ ERROR: Emotion model not loaded!")
         return "neutral"
     
-    # Use the trained model
+    # Use the improved trained model
     try:
-        processed_text = preprocess_text(text)
+        processed_text = preprocess_text_advanced(text)
         print(f"Original text: {text}")
         print(f"Processed text: {processed_text}")
         
+        # Vectorize text
         vectorized_text = emotion_vectorizer.transform([processed_text])
-        prediction = emotion_model.predict(vectorized_text)[0]
         
+        # Extract sentiment features
+        sentiment_features = extract_sentiment_features(text)
+        sentiment_array = np.array([[sentiment_features['vader_compound'], 
+                                   sentiment_features['vader_positive'], 
+                                   sentiment_features['vader_negative'], 
+                                   sentiment_features['vader_neutral']]])
+        
+        # Combine text features with sentiment features
+        combined_features = hstack([vectorized_text, sentiment_array])
+        
+        prediction = emotion_model.predict(combined_features)[0]
+        
+        # Post-processing: Check for negation conflicts
+        vader_compound = sentiment_features['vader_compound']
+        
+        # If VADER says negative but model predicts positive emotion, adjust
+        if vader_compound < -0.3:  # Strongly negative
+            if prediction in ['love', 'happiness', 'fun', 'enthusiasm']:
+                # Convert to appropriate negative emotion
+                if 'hate' in text.lower() or 'angry' in text.lower():
+                    prediction = 'hate'
+                elif 'sad' in text.lower():
+                    prediction = 'sadness'
+                elif 'worr' in text.lower():
+                    prediction = 'worry'
+                else:
+                    prediction = 'anger'
+        
+        # If VADER says positive but model predicts negative emotion, adjust
+        elif vader_compound > 0.3:  # Strongly positive
+            if prediction in ['hate', 'anger', 'sadness', 'worry']:
+                # Convert to appropriate positive emotion
+                if 'love' in text.lower():
+                    prediction = 'love'
+                elif 'happy' in text.lower():
+                    prediction = 'happiness'
+                elif 'fun' in text.lower():
+                    prediction = 'fun'
+                else:
+                    prediction = 'happiness'
+        
+        print(f"VADER compound: {vader_compound:.3f}")
         print(f"Predicted emotion: {prediction}")
         return prediction
     except Exception as e:
@@ -98,7 +179,7 @@ def get_emotion(text):
 @app.route('/')
 def home():
     model_status = "✅ Loaded" if emotion_model is not None else "❌ Not found"
-    available_emotions = ["neutral", "love", "happiness", "sadness", "relief", "hate", "anger", "fun", "enthusiasm", "surprise", "empty", "worry", "boredom"]
+    available_emotions = ["anger", "boredom", "empty", "enthusiasm", "fun", "happiness", "hate", "love", "neutral", "relief", "sadness", "surprise", "worry"]
     return jsonify({
         "message": "Flask API is running!", 
         "emotion_model": model_status,
