@@ -198,9 +198,25 @@ def signup():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
+    
+    # Check for admin login first
+    if data['email'] == 'admin' and data['password'] == 'admin123':
+        return jsonify({
+            "message": "Admin login successful", 
+            "user_id": 0,
+            "is_admin": True,
+            "name": "Administrator"
+        })
+    
+    # Regular user login
     user = User.query.filter_by(email=data['email'], password=data['password']).first()
     if user:
-        return jsonify({"message": "Login successful", "user_id": user.id})
+        return jsonify({
+            "message": "Login successful", 
+            "user_id": user.id,
+            "is_admin": False,
+            "name": user.name
+        })
     else:
         return jsonify({"message": "Invalid credentials"}), 401
 
@@ -213,6 +229,21 @@ def feedback():
     db.session.add(feedback)
     db.session.commit()
     return jsonify({"message": "Feedback submitted", "emotion": emotion})
+
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    """Dedicated admin login endpoint"""
+    data = request.json
+    
+    if data['email'] == 'admin' and data['password'] == 'admin123':
+        return jsonify({
+            "message": "Admin login successful", 
+            "user_id": 0,
+            "is_admin": True,
+            "name": "Administrator"
+        })
+    else:
+        return jsonify({"message": "Invalid admin credentials"}), 401
 
 @app.route('/admin/feedbacks', methods=['GET'])
 def get_all_feedback():

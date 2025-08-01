@@ -1,0 +1,22 @@
+{
+  "name": "ai-react-feedback-system",
+  "version": "1.0.0",
+  "description": "AI-powered feedback system with emotion sentiment analysis",
+  "scripts": {
+    "start": "./start.sh",
+    "start-backend": "cd backend && python app.py",
+    "start-frontend": "cd frontend && npm start",
+    "install-deps": "cd frontend && npm install",
+    "build": "cd frontend && npm run build",
+    "test": "cd frontend && npm test"
+  },
+  "keywords": [
+    "react",
+    "flask",
+    "ai",
+    "sentiment-analysis",
+    "feedback-system"
+  ],
+  "author": "AI + React Screening Test",
+  "license": "MIT"
+} 
